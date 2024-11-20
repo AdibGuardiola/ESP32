@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lámpara, Relé y Accionamiento de Agua</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 50px;
+      background-color: #f7f7f7;
+    }
+
+    .rele-btn {
+      font-size: 40px;
+      margin: 10px 10px;
+      padding-top: 20px 20px;
+      position: relative;
+      overflow: hidden;
+      padding: 60px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      background-color: #18c41e;
+      color: rgb(110, 7, 7);
+      transition: background-color 0.3s ease;
+    }
+
+    .rele-btn:hover {
+      background-color: #45a049;
+    }
+
+    .esfera {
+      margin-top: -60%;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background-color: #ffcc00;
+      position: absolute;
+      bottom: 5px;
+      left: 50%;
+      transform: translateX(-50%);
+      transition: background-color 0.3s ease;
+    }
+
+    .encendida {
+      background-color: #ff0000 !important;
+    }
+
+    canvas {
+      margin-top: 20px;
+      border: 1px solid #3d0909;
+    }
+
+    #temperatura,
+    #humedad,
+    #distancia {
+      font-size: 24px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div>
+    <button class="rele-btn" onclick="toggleLampara(1)">
+      <div class="esfera" id="esfera1"></div>
+      Relé1
+    </button>
+    
+    <button class="rele-btn" onclick="toggleLampara(2)">
+      <div class="esfera" id="esfera2"></div>
+      Relé2
+    </button>
+    
+    <button class="rele-btn" onclick="toggleLampara(3)">
+      <div class="esfera" id="esfera3"></div>
+      Relé3
+    </button>
+    
+    <button class="rele-btn" onclick="toggleLampara(4)">
+      <div class="esfera" id="esfera4"></div>
+      Relé4
+    </button>
+
+    <button class="rele-btn" onclick="toggleLampara(5)">
+      <div class="esfera" id="esfera5"></div>
+      Ventilador
+    </button>
+    
+    <button class="rele-btn" onclick="toggleLampara(6)">
+      <div class="esfera" id="esfera6"></div>
+      Agua
+    </button>
+  </div>
+
+  <div id="temperatura">Temperatura: -- °C</div>
+  <div id="humedad">Humedad: -- %</div>
+  <div id="distancia">Distancia: -- cm</div>
+
+  <canvas id="grafica" width="800" height="200"></canvas>
+  <canvas id="graficaAgua" width="800" height="400"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script>
+    let lamparaEncendida = [false, false, false, false];
+    let aguaEncendida = false;
+    let temperaturaData = [];
+    let humedadData = [];
+    let distanciaData = [];
+    let aguaData = [];
+
+    async function toggleLampara(relayNumber) {
+      try {
+        const action = lamparaEncendida[relayNumber - 1] ? 'apagar' : 'encender';
+        lamparaEncendida[relayNumber - 1] = !lamparaEncendida[relayNumber - 1];
+
+        const response = await fetch(`http://192.168.1.85/reles/${relayNumber}/${action}`);
+
+        if (response.ok) {
+          const data = await response.text();
+          console.log('Respuesta del servidor:', data);
+
+          const lamparaDiv = document.getElementById(`esfera${relayNumber}`); // Corregir el ID
+         
+          if (lamparaEncendida[relayNumber - 1]) {
+            lamparaDiv.classList.add('encendida');
+          } else {
+            lamparaDiv.classList.remove('encendida');
+          }
+        } else {
+          console.error('Error en la solicitud:', response.status);
+        }
+      } catch (error) {
+        console.error('Error:', error);
+      }
+    }
+
+    async function obtenerDistancia() {
+      try {
+        const responseDistancia = await fetch("http://192.168.1.85/distancia");
+        if (responseDistancia.ok) {
+          const dataDistancia = await responseDistancia.json();
+          console.log(dataDistancia);
+          document.getElementById("distancia").textContent = "Distancia: " + dataDistancia.distancia + " cm";
+
+          distanciaData.push(dataDistancia.distancia);
+
+          if (distanciaData.length > 10) {
+            distanciaData.shift();
+          }
+        }
+      } catch (error) {
+        console.error("Error:", error);
+      }
+    }
+
+    async function actualizarDatos() {
+      try {
+        const responseTemperatura = await fetch("http://192.168.1.85/datos");
+        const responseHumedad = await fetch("http://192.168.1.85/datos");
+
+        if (responseTemperatura.ok && responseHumedad.ok) {
+          const dataTemperatura = await responseTemperatura.json();
+          const dataHumedad = await responseHumedad.json();
+          
+          const temperatura = parseFloat(dataTemperatura.temperatura).toFixed(2);
+          const humedad = parseFloat(dataHumedad.humedad).toFixed(2);
+
+          document.getElementById("temperatura").textContent = "Temperatura: " + temperatura + " °C";
+          document.getElementById("humedad").textContent = "Humedad: " + humedad + " %";
+
+          temperaturaData.push(temperatura);
+          humedadData.push(humedad);
+
+          if (temperaturaData.length > 10) {
+            temperaturaData.shift();
+            humedadData.shift();
+          }
+
+          drawGraph();
+        }
+
+        await obtenerDistancia();
+        drawGraphAgua();
+      } catch (error) {
+        console.error("Error:", error);
+      }
+    }
+
+    const canvas = document.getElementById('grafica');
+    const ctx = canvas.getContext('2d');
+
+    function drawGraph() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawGrid(ctx, canvas.width, canvas.height);
+
+      drawLine(temperaturaData, 'red', ctx);
+      drawLine(humedadData, 'blue', ctx);
+      
+      drawAxisLabels(ctx, canvas.width, canvas.height);
+    }
+
+    const canvasAgua = document.getElementById('graficaAgua');
+    const ctxAgua = canvasAgua.getContext('2d');
+
+    function drawGraphAgua() {
+      ctxAgua.clearRect(0, 0, canvasAgua.width, canvasAgua.height);
+
+      drawGrid(ctxAgua, canvasAgua.width, canvasAgua.height);
+
+      drawLineAgua(distanciaData, 'purple', ctxAgua);
+      
+      drawAxisLabelsAgua(ctxAgua, canvasAgua.width, canvasAgua.height); // Corregido aquí
+    }
+
+    function drawAxisLabelsAgua(context, width, height) {
+  context.fillStyle = '#000';
+  context.textAlign = 'center';
+  context.textBaseline = 'top';
+
+  // Dibujar indicadores de tiempo en la parte inferior
+  for (let i = 0; i < 6; i++) {
+    const time = i * 1; // Suponiendo que se muestra cada 10 minutos
+    const xPos = (width / 5) * i;
+    context.fillText(time, xPos, height - 20);
+  }
+
+// Dibujar indicadores de distancia en la parte derecha
+const maxValue = Math.max(...distanciaData);
+const minValue = Math.min(...distanciaData);
+const range = maxValue - minValue;
+const step = range / 5;
+
+for (let i = 0; i < 6; i++) {
+  const distance = maxValue + i * step; 
+  const yPos = (height / 5) * i; // Ajustar la posición vertical
+  context.fillText(distance.toFixed(2), width - 40, yPos); // Ajustar la posición horizontal
+}
+
+}
+
+
+    function drawGrid(context, width, height) {
+      const gridSizeX = 100;
+      const gridSizeY = 50;
+      
+      context.strokeStyle = '#ccc';
+      context.lineWidth = 1;
+      
+      for (let y = gridSizeY; y < height; y += gridSizeY) {
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+        context.stroke();
+      }
+      
+      for (let x = gridSizeX; x < width; x += gridSizeX) {
+        context.beginPath();
+        context.moveTo(x, 0);
+        context.lineTo(x, height);
+        context.stroke();
+      }
+    }
+
+    function drawAxisLabels(context, width, height) {
+      context.fillStyle = '#000';
+      context.textAlign = 'center';
+      context.textBaseline = 'top';
+      for (let x = 0; x < width; x += 100) {
+        context.fillText(x / 100, x, height - 20);
+      }
+
+      context.textAlign = 'right';
+      context.textBaseline = 'middle';
+      for (let y = 0; y < height; y += 50) {
+        context.fillText(y, width - 5, y);
+      }
+    }
+
+    function drawLine(data, color, context) {
+      context.strokeStyle = color;
+      context.beginPath();
+      context.moveTo(0, context.canvas.height - (data[0] * 3));
+
+      for (let i = 0; i < data.length; i++) {
+        context.lineTo((context.canvas.width / (data.length - 1)) * i, context.canvas.height - (data[i] * 3));
+        context.arc((context.canvas.width / (data.length - 1)) * i, context.canvas.height - (data[i] * 3), 3, 0, 2 * Math.PI);
+      }
+
+      context.stroke();
+    }
+
+    function drawLineAgua(data, color, context) {
+  context.strokeStyle = color;
+  context.beginPath();
+
+  const offsetY = 0;
+
+  // Definir un factor de escala para aumentar la sensibilidad a los cambios en los datos
+  const scaleFactor = 25;
+
+  context.moveTo(0, context.canvas.height - (data[0] * scaleFactor) + offsetY);
+
+  for (let i = 1; i < data.length; i++) {
+    const y = context.canvas.height - (data[i] * scaleFactor) + offsetY;
+    context.lineTo((context.canvas.width / (data.length - 1)) * i, y);
+  }
+
+  context.stroke();
+
+  drawAxisLabelsAgua(context, context.canvas.width, context.canvas.height); // Llamada agregada
+}
+
+    setInterval(actualizarDatos, 1000);
+    
+  </script>
+</body>
+</html>
